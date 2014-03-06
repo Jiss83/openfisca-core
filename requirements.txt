@@ -1,2 +1,6 @@
+<<<<<<< HEAD
 -e git+https://github.com/etalab/biryani.git#egg=Biryani1
+=======
+-e git+https://github.com/etalab/biryani.git@biryani1#egg=Biryani1
+>>>>>>> cadc11a7309a850c8e968443201431d5f51080f6
 -e .

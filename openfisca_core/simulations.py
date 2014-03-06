@@ -23,6 +23,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+<<<<<<< HEAD
 import collections
 import copy
 import datetime as dt
@@ -649,129 +650,45 @@ class SurveySimulation(Simulation):
         if self.chunks_count == 1:
             self._compute()
         # Note: subset has already be applied
+=======
+class Simulation(object):
+    compact_legislation = None
+    date = None
+    default_compact_legislation = None
+    entities = None
+    entity_by_column_name = None
+    tax_benefit_system = None
+
+    def __init__(self, compact_legislation = None, date = None, tax_benefit_system = None):
+        assert date is not None
+        self.date = date
+        assert tax_benefit_system is not None
+        self.tax_benefit_system = tax_benefit_system
+
+        self.compact_legislation = compact_legislation \
+            if compact_legislation is not None \
+            else tax_benefit_system.get_compact_legislation(date)
+        self.default_compact_legislation = tax_benefit_system.get_compact_legislation(date)
+
+    def compute(self, column_name, requested_columns_name = None):
+        if requested_columns_name is None:
+            requested_columns_name = set()
+>>>>>>> cadc11a7309a850c8e968443201431d5f51080f6
         else:
-            num = self.num_table
-            #TODO: replace 'idmen' by something not france-specific : the biggest entity
-            if num == 1:
-                list_men = self.input_table.table['idmen'].unique()
-            if num == 3:
-                list_men = self.input_table.table3['ind']['idmen'].unique()
+            assert column_name not in requested_columns_name, 'Infinite loop. Missing values for columns: {}'.format(
+                u', '.join(sorted(requested_columns_name)).encode('utf-8'))
+        return self.entity_by_column_name[column_name].compute(column_name, requested_columns_name)
 
-            len_tot = len(list_men)
-            chunk_length = int(len_tot / self.chunks_count) + 1
+    def set_entities(self, entities):
+        self.entities = entities
+        self.entity_by_column_name = dict(
+            (column_name, entity)
+            for entity in self.entities.itervalues()
+            for column_name in entity.column_by_name.iterkeys()
+            )
 
-            for chunk_index in range(0, self.chunks_count):
-                start= chunk_index * chunk_length
-                end = (chunk_index + 1) * chunk_length
-
-                subsimu = SurveySimulation()
-                subsimu.__dict__ = self.__dict__.copy()
-                subsimu.subset = list_men[start:end]
-                subsimu.chunks_count = 1
-                subsimu.compute()
-                simu_chunk = subsimu
-                print("compute chunk %d / %d" %(chunk_index + 1, self.chunks_count))
-
-                if self.output_table is not None:
-                    self.output_table = self.output_table + simu_chunk.output_table
-                else:
-                    self.output_table = simu_chunk.output_table
-
-            # as set_imput didn't run, we do it now
-            self.output_table.index = self.input_table.index
-            self.output_table._inputs = self.input_table
-            self.output_table._nrows = self.input_table._nrows
-
-    def aggregated_by_entity(self, entity = None, variables = None, all_output_vars = True,
-                              all_input_vars = False, force_sum = False):
-        """
-        Generates aggregates at entity level
-
-        Parameters
-        ----------
-        entity : string, default None
-                 one of the entities which list can be found in countries.country.__init__.py
-                 when None the first entity of ENTITIES_INDEX is used
-        variables : list
-                 variables to aggregate
-        all_output_vars : boolean, default True
-                          If True select all output variables
-        all_output_vars : boolean, default False
-                          If True select all input variables
-        Returns
-        -------
-        out_tables[0], out_tables[1] : tuple of DataFrame
-        """
-        WEIGHT = model.WEIGHT
-
-        if self.output_table is None:
-            raise Exception('self.output_table should not be None')
-
-        if entity is None:
-            entity = model.ENTITIES_INDEX[0]
-
-        tax_benefit_systems = [self.output_table]
-        if self.reforme is True:
-            tax_benefit_systems.append(self.output_table_default)
-
-        out_tables = []
-
-        for tax_benefit_system in tax_benefit_systems:
-            out_dct = {}
-            inputs = tax_benefit_system._inputs
-            idx = entity
-            people = None
-            if self.num_table == 1:
-                try:
-                    enum = inputs.column_by_name.get('qui'+entity).enum
-                    people = [x[1] for x in enum]
-                except:
-                    people = None
-
-            # TODO: too franco-centric. Change this !!
-            if entity == "ind":
-                entity_id = "noi"
-            else:
-                entity_id = "id"+entity
-
-            input_variables = set([WEIGHT, entity_id])
-            if all_input_vars:
-                input_variables = input_variables.union(set(inputs.column_by_name))
-            if variables is not None:
-                input_variables = input_variables.union(set(inputs.column_by_name).intersection(variables))
-                output_variables = set(tax_benefit_system.column_by_name).intersection(variables)
-            if all_output_vars:
-                output_variables = set(tax_benefit_system.column_by_name)
-
-            varnames = output_variables.union(input_variables)
-            for varname in varnames:
-                if varname in tax_benefit_system.column_by_name:
-                    col = tax_benefit_system.column_by_name.get(varname)
-                    condition = (col.entity != entity) or (force_sum == True)
-                    type_col_condition = not(isinstance(col, EnumCol) or isinstance(col, EnumPresta))
-                    if condition and type_col_condition:
-                        val = tax_benefit_system.get_value(varname, entity=idx, opt = people, sum_ = True)
-                    else:
-                        val = tax_benefit_system.get_value(varname, entity=idx)
-
-                elif varname in inputs.column_by_name:
-                    val = inputs.get_value(varname, idx)
-                else:
-                    raise Exception('%s was not found in tax-benefit system nor in inputs' % varname)
-
-                out_dct[varname] = val
-
-            out_tables.append(DataFrame(out_dct))
-
-        if self.reforme is False:
-            out_tables.append(None)
-
-        return out_tables[0], out_tables[1]
-
-    def get_variables_dataframe(self, variables=None, entity="ind"):
-        """
-        Get variables
-        """
-        return self.aggregated_by_entity(entity = entity, variables = variables,
-                                         all_output_vars = False,
-                                         all_input_vars = False, force_sum = False)[0]
+    def get_holder_by_name(self, column_name, default = UnboundLocalError):
+        entity = self.entity_by_column_name[column_name]
+        if default is UnboundLocalError:
+            return entity.holder_by_name[column_name]
+        return entity.holder_by_name.get(column_name, default)

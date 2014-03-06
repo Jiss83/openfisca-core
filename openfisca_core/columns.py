@@ -23,10 +23,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
-from __future__ import division
-
 import collections
-from datetime import date
+import datetime
 
 from biryani1 import strings
 import numpy as np
@@ -35,36 +33,16 @@ from . import conv
 from .enumerations import Enum
 
 
-def default_frequency_converter(from_ = None, to_ = None):
-    """
-    Default function to convert Columns between different frequencies
-    """
-    if (from_ is None) and (to_ is None):
-        return lambda x: x
-
-    if (from_ == "year") and (to_ == "trim"):
-        return lambda x: x / 4
-
-    if (from_ == "trim") and (to_ == "year"):
-        return lambda x: x * 4
-
-    if (from_ == "year") and (to_ == "month"):
-        return lambda x: x / 12
-
-    if (from_ == "month") and (to_ == "year"):
-        return lambda x: 12 * x
-
-
 # Base Column
 
 
 class Column(object):
     _default = 0
     _dtype = float
-    _frequency_converter = default_frequency_converter
+    cerfa_field = None
     end = None
     entity = None
-    freq = None
+    info = None
     # json_type = None  # Defined in sub-classes
     label = None
     legislative_input = False
@@ -75,14 +53,17 @@ class Column(object):
     cerfa_field = None
     info = None
 
-    def __init__(self, label = None, default = None, entity = None, start = None, end = None, val_type = None,
-            freq = None, legislative_input = True, survey_only = False, cerfa_field = None, info = None):
+    def __init__(self, label = None, cerfa_field = None, default = None, end = None, entity = None, info = None,
+            legislative_input = True, start = None, survey_only = False, val_type = None):
+        if cerfa_field is not None:
+            self.cerfa_field = cerfa_field
         if default is not None and default != self._default:
             self._default = default
         if end is not None:
             self.end = end
         self.entity = entity or 'ind'
-        self.freq = freq or 'year'
+        if info is not None:
+            self.info = info
         if label is not None:
             self.label = label
         if legislative_input:
@@ -102,11 +83,13 @@ class Column(object):
         self_json = collections.OrderedDict((
             ('@type', self.json_type),
             ))
+        if self.cerfa_field is not None:
+            self_json['cerfa_field'] = self.cerfa_field
         if self._default is not None:
             self_json['default'] = self._default
         end = self.end
         if end is not None:
-            if isinstance(end, date):
+            if isinstance(end, datetime.date):
                 end = end.isoformat()
             self_json['end'] = end
         if self.entity is not None:
@@ -119,7 +102,7 @@ class Column(object):
             self_json['name'] = self.name
         start = self.start
         if start is not None:
-            if isinstance(start, date):
+            if isinstance(start, datetime.date):
                 start = start.isoformat()
             self_json['start'] = start
         if self.val_type is not None:
@@ -143,7 +126,6 @@ class BoolCol(Column):
         return conv.pipe(
             conv.test_isinstance(int, bool),
             conv.anything_to_bool,
-            conv.default(self._default),
             )
 
 
@@ -160,7 +142,6 @@ class DateCol(Column):
         return conv.pipe(
             conv.test_isinstance(basestring),
             conv.iso8601_input_to_date,
-            conv.default(self._default),
             )
 
 
@@ -176,7 +157,6 @@ class FloatCol(Column):
         return conv.pipe(
             conv.test_isinstance(float, int),
             conv.anything_to_float,
-            conv.default(self._default),
             )
 
 
@@ -189,10 +169,7 @@ class IntCol(Column):
 
     @property
     def json_to_python(self):
-        return conv.pipe(
-            conv.test_isinstance(int),
-            conv.default(self._default),
-            )
+        return conv.test_isinstance(int)
 
 
 # Level-2 Columns
@@ -286,19 +263,8 @@ class Prestation(Column):
     Prestation is a wraper around a function which takes some arguments and return a single array.
     _P is a reserved kwargs intended to pass a tree of parametres to the function
     """
-    _children = None
-    _freq = None  # Caution: Not the same as Column.freq
     _func = None
-    _has_freq = False
-    _hasOption = False
-    _needDefaultParam = False
-    _needParam = False
-    _option = None
-    _parents = None
-    calculated = False
-    disabled = False
-    inputs = None
-    json_type = 'Float'
+    formula_constructor = None
 
     def __init__(self, func, entity = None, label = None, start = None, end = None, val_type = None, freq = None,
             survey_only = False):
@@ -309,52 +275,6 @@ class Prestation(Column):
         self._freq = {}
         assert func is not None, 'A function to compute the prestation should be provided'
         self._func = func
-        self._option = {}
-        self._parents = set()  # prestations that current prestations depends on
-        self.inputs = set(func.__code__.co_varnames[:func.__code__.co_argcount])
-
-        # Check if function func needs parameter tree _P.
-        if '_P' in self.inputs:
-            self._needParam = True
-            self.inputs.remove('_P')
-
-        # Check if function func needs default parameter tree _defaultP.
-        if '_defaultP' in self.inputs:
-            self._needDefaultParam = True
-            self.inputs.remove('_defaultP')
-
-        # Check if an option dict is passed to the function.
-        if '_option' in self.inputs:
-            self._hasOption = True
-            self.inputs.remove('_option')
-            self._option = func.func_defaults[0]
-            for var in self._option:
-                assert var in self.inputs, '%s in option but not in function args' % var
-
-        # Check if a frequency dict is passed to the function.
-        if '_freq' in self.inputs:
-            self._has_freq = True
-            self.inputs.remove('_freq')
-            if self._hasOption:
-                self._freq = func.func_defaults[1]
-            else:
-                self._freq = func.func_defaults[0]
-            for var in self._freq:
-                assert var in self.inputs, '%s in freq but not in function args' % var
-
-    def add_child(self, prestation):
-        self._children.add(prestation)
-        prestation._parents.add(self)
-
-    def to_column(self):
-        col = Column(label = self.label,
-                     entity = self.entity,
-                     start = self.start,
-                     end = self.end,
-                     val_type = self.val_type,
-                     freq = self.freq)
-        col.name = self.name
-        return col
 
 
 # Level-1 Prestations
@@ -378,6 +298,15 @@ class EnumPresta(Prestation, EnumCol):
         Prestation.__init__(self, func, **kwargs)
 
 
+class FloatPresta(Prestation, FloatCol):
+    '''
+    A Prestation inheriting from BoolCol
+    '''
+    def __init__(self, func, **kwargs):
+        FloatCol.__init__(self, **kwargs)
+        Prestation.__init__(self, func = func, **kwargs)
+
+
 class IntPresta(Prestation, IntCol):
     '''
     A Prestation inheriting from IntCol
@@ -385,20 +314,3 @@ class IntPresta(Prestation, IntCol):
     def __init__(self, func, **kwargs):
         IntCol.__init__(self, **kwargs)
         Prestation.__init__(self, func, **kwargs)
-
-
-#    def dep_resolve(self, resolved=set(), unresolved=set()):
-#        '''
-#        Dependency solver.
-#        Algorithm found here http://www.electricmonk.nl/log/2008/08/07/dependency-resolving-algorithm/
-#        '''
-#        edges = self._parents
-#        unresolved.add(self)
-#        for edge in edges:
-#            if edge not in resolved:
-#                if edge in unresolved:
-#                    raise Exception('Circular reference detected: %s -> %s' % (self._name, edge._name))
-#                edge.dep_resolve(resolved, unresolved)
-#
-#        resolved.add(self)
-#        unresolved.remove(self)

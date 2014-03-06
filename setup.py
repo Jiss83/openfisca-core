@@ -46,7 +46,7 @@ doc_lines = __doc__.split('\n')
 
 setup(
     name = 'OpenFisca-Core',
-    version = '0.2dev',
+    version = '0.3dev',
 
     author = 'OpenFisca Team',
     author_email = 'contact@openfisca.fr',
@@ -61,10 +61,11 @@ setup(
         ('share/locale/fr/LC_MESSAGES', ['openfisca_core/i18n/fr/LC_MESSAGES/openfisca-core.mo']),
         ],
     install_requires = [
-        "Babel >= 0.9.4",
-        'Biryani1 >= 0.9dev',
-        "numpy",
-        "pandas >= 0.13.0",
+        'Babel >= 0.9.4',
+        'Biryani1[datetimeconv] >= 0.9dev',
+        'numpy',
+        'pandas >= 0.13',
+        'tables',
         ],
     message_extractors = {
         'openfisca_core': [
